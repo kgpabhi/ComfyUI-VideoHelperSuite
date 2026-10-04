@@ -902,95 +902,320 @@ function addVideoPreview(nodeType, isInput=true) {
                 element.value = v;
             },
         });
-        allowDragFromWidget(previewWidget)
+        allowDragFromWidget(previewWidget);
+
         previewWidget.computeSize = function(width) {
             if (this.aspectRatio && !this.parentEl.hidden) {
-                let height = (previewNode.size[0]-20)/ this.aspectRatio + 10;
+                let height = (previewNode.size[0] - 20) / this.aspectRatio + 10;
                 if (!(height > 0)) {
                     height = 0;
+                }
+                // Add height for the controls bar when visible
+                if (this.controlsEl && this.controlsEl.style.display !== 'none' && !this.videoEl.hidden) {
+                    height += 28;
                 }
                 this.computedHeight = height + 10;
                 return [width, height];
             }
-            return [width, -4];//no loaded src, widget should not display
-        }
-        element.addEventListener('contextmenu', (e)  => {
-            e.preventDefault()
-            return app.canvas._mousedown_callback(e)
+            return [width, -4]; // no loaded src, widget should not display
+        };
+
+        // Prevent LiteGraph canvas drag/events from interfering with controls
+        let isScrubbing = false;
+        const isControlsTarget = (e) => isScrubbing || (previewWidget.controlsEl && previewWidget.controlsEl.contains(e.target));
+
+        element.addEventListener('contextmenu', (e) => {
+            if (isControlsTarget(e)) {
+                e.stopPropagation();
+                return;
+            }
+            e.preventDefault();
+            return app.canvas._mousedown_callback(e);
         }, true);
-        element.addEventListener('pointerdown', (e)  => {
-            e.preventDefault()
-            return app.canvas._mousedown_callback(e)
+
+        element.addEventListener('pointerdown', (e) => {
+            if (isControlsTarget(e)) {
+                e.stopPropagation();
+                return;
+            }
+            e.preventDefault();
+            return app.canvas._mousedown_callback(e);
         }, true);
-        element.addEventListener('mousewheel', (e)  => {
-            e.preventDefault()
-            return app.canvas._mousewheel_callback(e)
+
+        element.addEventListener('mousewheel', (e) => {
+            if (isControlsTarget(e)) {
+                e.stopPropagation();
+                return;
+            }
+            e.preventDefault();
+            return app.canvas._mousewheel_callback(e);
         }, true);
-        element.addEventListener('pointermove', (e)  => {
-            e.preventDefault()
-            return app.canvas._mousemove_callback(e)
+
+        element.addEventListener('pointermove', (e) => {
+            if (isControlsTarget(e)) {
+                e.stopPropagation();
+                return;
+            }
+            e.preventDefault();
+            return app.canvas._mousemove_callback(e);
         }, true);
-        element.addEventListener('pointerup', (e)  => {
-            e.preventDefault()
-            return app.canvas._mouseup_callback(e)
+
+        element.addEventListener('pointerup', (e) => {
+            if (isControlsTarget(e)) {
+                isScrubbing = false;
+                e.stopPropagation();
+                return;
+            }
+            e.preventDefault();
+            return app.canvas._mouseup_callback(e);
         }, true);
+
         element.addEventListener('dragover', (e) => {
-            //A little hacky, but allows drag events onto the preview itself
             e.preventDefault();
             e.dataTransfer.dropEffect = "copy";
-            app.dragOverNode = this
-        })
-        previewWidget.value = {hidden: false, paused: false, params: {},
-            muted: app.ui.settings.getSettingValue("VHS.DefaultMute")}
+            app.dragOverNode = this;
+        });
+
+        previewWidget.value = {
+            hidden: false,
+            paused: false,
+            params: {},
+            muted: app.ui.settings.getSettingValue("VHS.DefaultMute")
+        };
+
         previewWidget.parentEl = document.createElement("div");
         previewWidget.parentEl.className = "vhs_preview";
-        previewWidget.parentEl.style['width'] = "100%"
+        previewWidget.parentEl.style['width'] = "100%";
         element.appendChild(previewWidget.parentEl);
+
         previewWidget.videoEl = document.createElement("video");
         previewWidget.videoEl.controls = false;
         previewWidget.videoEl.loop = true;
         previewWidget.videoEl.muted = true;
-        previewWidget.videoEl.style['width'] = "100%"
-        previewWidget.videoEl.addEventListener("loadedmetadata", () => {
+        previewWidget.videoEl.style['width'] = "100%";
 
+        // --- Controls Container ---
+        const controlsEl = document.createElement("div");
+        previewWidget.controlsEl = controlsEl;
+        controlsEl.className = "vhs_preview_controls";
+        Object.assign(controlsEl.style, {
+            display: "none", // Hidden by default when node is added
+            flexDirection: "row",
+            alignItems: "center",
+            gap: "6px",
+            padding: "3px 6px",
+            marginTop: "4px",
+            background: "rgba(20, 20, 20, 0.85)",
+            borderRadius: "4px",
+            boxSizing: "border-box",
+            userSelect: "none",
+        });
+
+        // --- Play / Pause Button ---
+        const playBtn = document.createElement("button");
+        previewWidget.playBtn = playBtn;
+        playBtn.type = "button";
+        playBtn.textContent = "▶";
+        Object.assign(playBtn.style, {
+            background: "#545454",
+            color: "#eee",
+            border: "1px solid #444",
+            borderRadius: "3px",
+            padding: "2px 6px",
+            fontSize: "12px",
+            lineHeight: "1",
+            cursor: "pointer",
+            outline: "none",
+            minWidth: "24px",
+            height: "20px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+        });
+
+        const updatePlayBtn = () => {
+            playBtn.textContent = previewWidget.videoEl.paused ? "▶" : "⏸";
+        };
+
+        playBtn.onclick = (e) => {
+            e.stopPropagation();
+            if (previewWidget.videoEl.paused) {
+                previewWidget.videoEl.play();
+                previewWidget.value.paused = false;
+            } else {
+                previewWidget.videoEl.pause();
+                previewWidget.value.paused = true;
+            }
+            updatePlayBtn();
+        };
+
+        // --- Scrubber (Seek Bar) ---
+        const scrubber = document.createElement("input");
+        previewWidget.scrubber = scrubber;
+        scrubber.type = "range";
+        scrubber.min = "0";
+        scrubber.max = "100";
+        scrubber.step = "0.01";
+        scrubber.value = "0";
+
+        // Enlarged vertical hit area: the input is 20px tall (easy to grab/drag)
+        // but only the 4px track is painted. Injected once, shared by all previews.
+        scrubber.className = "vhs_preview_scrubber";
+        if (!document.getElementById("vhs_preview_scrubber_style")) {
+            const style = document.createElement("style");
+            style.id = "vhs_preview_scrubber_style";
+            style.textContent = `
+                .vhs_preview_scrubber {
+                    -webkit-appearance: none;
+                    appearance: none;
+                    height: 20px;             /* <- raise this for an even bigger hit area */
+                    margin: 0 2px;
+                    padding: 0;
+                    background: transparent;
+                    cursor: pointer;
+                    outline: none;
+                }
+                .vhs_preview_scrubber::-webkit-slider-runnable-track {
+                    height: 4px;
+                    margin: 8px 0;            /* centers 4px track inside 20px box */
+                    background: #545454;
+                    border-radius: 2px;
+                }
+                .vhs_preview_scrubber::-webkit-slider-thumb {
+                    -webkit-appearance: none;
+                    width: 16px;
+                    height: 16px;
+                    margin-top: -6px;         /* centers thumb on the track */
+                    background: #3b82f6;
+                    border: none;
+                    border-radius: 50%;
+                    cursor: pointer;
+                }
+                .vhs_preview_scrubber::-moz-range-track {
+                    height: 4px;
+                    background: #545454;
+                    border-radius: 2px;
+                }
+                .vhs_preview_scrubber::-moz-range-thumb {
+                    width: 16px;
+                    height: 16px;
+                    background: #3b82f6;
+                    border: none;
+                    border-radius: 50%;
+                    cursor: pointer;
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
+        Object.assign(scrubber.style, {
+            flex: "1",
+            minWidth: "0",
+            cursor: "pointer",
+        });
+
+        // --- Timer ---
+        const timerEl = document.createElement("span");
+        previewWidget.timerEl = timerEl;
+        timerEl.textContent = "0:00 / 0:00";
+        Object.assign(timerEl.style, {
+            color: "#fff",
+            fontSize: "12px",
+            fontFamily: "monospace",
+            whiteSpace: "nowrap",
+            lineHeight: "20px",
+        });
+
+        function formatTime(seconds) {
+            if (isNaN(seconds) || !isFinite(seconds)) return "0:00";
+            let m = Math.floor(seconds / 60);
+            let s = Math.floor(seconds % 60);
+            return `${m}:${s.toString().padStart(2, '0')}`;
+        }
+
+        function updateTimer() {
+            const current = previewWidget.videoEl.currentTime || 0;
+            const duration = previewWidget.videoEl.duration || 0;
+            timerEl.textContent = `${formatTime(current)} / ${formatTime(duration)}`;
+        }
+
+        // Scrubber events
+        scrubber.addEventListener("pointerdown", (e) => { isScrubbing = true; e.stopPropagation(); });
+        scrubber.addEventListener("mousedown", (e) => { isScrubbing = true; e.stopPropagation(); });
+        scrubber.addEventListener("input", (e) => {
+            e.stopPropagation();
+            if (previewWidget.videoEl.duration) {
+                previewWidget.videoEl.currentTime = (parseFloat(scrubber.value) / 100) * previewWidget.videoEl.duration;
+            }
+            updateTimer();
+        });
+        const stopScrub = (e) => { isScrubbing = false; e?.stopPropagation?.(); };
+        scrubber.addEventListener("pointerup", stopScrub);
+        scrubber.addEventListener("mouseup", stopScrub);
+        scrubber.addEventListener("change", stopScrub);
+
+        // Video playback events
+        previewWidget.videoEl.addEventListener("play", updatePlayBtn);
+        previewWidget.videoEl.addEventListener("pause", updatePlayBtn);
+        previewWidget.videoEl.addEventListener("timeupdate", () => {
+            if (!isScrubbing && previewWidget.videoEl.duration) {
+                scrubber.value = (previewWidget.videoEl.currentTime / previewWidget.videoEl.duration) * 100;
+            }
+            updateTimer();
+        });
+
+        controlsEl.appendChild(playBtn);
+        controlsEl.appendChild(scrubber);
+        controlsEl.appendChild(timerEl);
+
+        previewWidget.videoEl.addEventListener("loadedmetadata", () => {
             previewWidget.aspectRatio = previewWidget.videoEl.videoWidth / previewWidget.videoEl.videoHeight;
+            // Reveal controls now that a preview video is ready
+            controlsEl.style.display = "flex";
+            updateTimer();
+            updatePlayBtn();
             fitHeight(this);
         });
+
         previewWidget.videoEl.addEventListener("error", () => {
-            //TODO: consider a way to properly notify the user why a preview isn't shown.
             previewWidget.parentEl.hidden = true;
+            controlsEl.style.display = "none";
             fitHeight(this);
         });
-        previewWidget.videoEl.onmouseenter =  () => {
-            previewWidget.videoEl.muted = previewWidget.value.muted
+
+        previewWidget.videoEl.onmouseenter = () => {
+            previewWidget.videoEl.muted = previewWidget.value.muted;
         };
         previewWidget.videoEl.onmouseleave = () => {
             previewWidget.videoEl.muted = true;
         };
 
         previewWidget.imgEl = document.createElement("img");
-        previewWidget.imgEl.style['width'] = "100%"
+        previewWidget.imgEl.style['width'] = "100%";
         previewWidget.imgEl.hidden = true;
         previewWidget.imgEl.onload = () => {
             previewWidget.aspectRatio = previewWidget.imgEl.naturalWidth / previewWidget.imgEl.naturalHeight;
+            controlsEl.style.display = "none"; // Ensure controls stay hidden for image previews
             fitHeight(this);
         };
-        previewWidget.parentEl.appendChild(previewWidget.videoEl)
-        previewWidget.parentEl.appendChild(previewWidget.imgEl)
+
+        previewWidget.parentEl.appendChild(previewWidget.videoEl);
+        previewWidget.parentEl.appendChild(previewWidget.imgEl);
+        previewWidget.parentEl.appendChild(controlsEl);
+
         var timeout = null;
         this.updateParameters = (params, force_update) => {
             if (!previewWidget.value.params) {
-                if(typeof(previewWidget.value) != 'object') {
-                    previewWidget.value =  {hidden: false, paused: false}
+                if (typeof(previewWidget.value) != 'object') {
+                    previewWidget.value = { hidden: false, paused: false };
                 }
-                previewWidget.value.params = {}
+                previewWidget.value.params = {};
             }
-            if (!Object.entries(params).some(([k,v]) => previewWidget.value.params[k] !== v)) {
-                return
+            if (!force_update && !Object.entries(params).some(([k, v]) => previewWidget.value.params[k] !== v)) {
+                return;
             }
-            Object.assign(previewWidget.value.params, params)
-            if (!force_update &&
-                app.ui.settings.getSettingValue("VHS.AdvancedPreviews") == 'Never') {
+            Object.assign(previewWidget.value.params, params);
+            if (!force_update && app.ui.settings.getSettingValue("VHS.AdvancedPreviews") == 'Never') {
                 return;
             }
             if (timeout) {
@@ -999,25 +1224,27 @@ function addVideoPreview(nodeType, isInput=true) {
             if (force_update) {
                 previewWidget.updateSource();
             } else {
-                timeout = setTimeout(() => previewWidget.updateSource(),100);
+                timeout = setTimeout(() => previewWidget.updateSource(), 100);
             }
         };
+
         previewWidget.updateSource = function () {
             if (this.value.params == undefined) {
                 return;
             }
-            let params =  {}
-            let advp = app.ui.settings.getSettingValue("VHS.AdvancedPreviews")
+            let params = {};
+            let advp = app.ui.settings.getSettingValue("VHS.AdvancedPreviews");
             if (advp == 'Never') {
-                advp = false
+                advp = false;
             } else if (advp == 'Input Only') {
-                advp = isInput
+                advp = isInput;
             } else {
-                advp = true
+                advp = true;
             }
-            Object.assign(params, this.value.params);//shallow copy
-            params.timestamp = Date.now()
+            Object.assign(params, this.value.params);
+            params.timestamp = Date.now();
             this.parentEl.hidden = this.value.hidden;
+
             if (params.format?.split('/')[0] == 'video'
                 || advp && (params.format?.split('/')[1] == 'gif')
                 || params.format == 'folder') {
@@ -1026,50 +1253,52 @@ function addVideoPreview(nodeType, isInput=true) {
                 if (!advp) {
                     this.videoEl.src = api.apiURL('/view?' + new URLSearchParams(params));
                 } else {
-                    let target_width = (previewNode.size[0]-20)*2 || 256;
-                    let minWidth = app.ui.settings.getSettingValue("VHS.AdvancedPreviewsMinWidth")
+                    let target_width = (previewNode.size[0] - 20) * 2 || 256;
+                    let minWidth = app.ui.settings.getSettingValue("VHS.AdvancedPreviewsMinWidth");
                     if (target_width < minWidth) {
-                        target_width = minWidth
+                        target_width = minWidth;
                     }
                     if (!params.custom_width || !params.custom_height) {
-                        params.force_size = target_width+"x?"
+                        params.force_size = target_width + "x?";
                     } else {
-                        let ar = params.custom_width/params.custom_height
-                        params.force_size = target_width+"x"+(target_width/ar)
+                        let ar = params.custom_width / params.custom_height;
+                        params.force_size = target_width + "x" + (target_width / ar);
                     }
-                    params.deadline = app.ui.settings.getSettingValue("VHS.AdvancedPreviewsDeadline")
+                    params.deadline = app.ui.settings.getSettingValue("VHS.AdvancedPreviewsDeadline");
                     this.videoEl.src = api.apiURL('/vhs/viewvideo?' + new URLSearchParams(params));
                 }
                 this.videoEl.hidden = false;
                 this.imgEl.hidden = true;
-            } else if (params.format?.split('/')[0] == 'image'){
-                //Is animated image
+            } else if (params.format?.split('/')[0] == 'image') {
                 this.imgEl.src = api.apiURL('/view?' + new URLSearchParams(params));
                 this.videoEl.hidden = true;
                 this.imgEl.hidden = false;
+                this.controlsEl.style.display = "none";
+                fitHeight(previewNode);
             }
-            delete previewNode.video_query
+
+            delete previewNode.video_query;
             const doQuery = async () => {
                 if (!previewWidget?.value?.params?.filename) {
-                    return
+                    return;
                 }
-                let qurl = api.apiURL('/vhs/queryvideo?' + new URLSearchParams(previewWidget.value.params))
-                let query = undefined
+                let qurl = api.apiURL('/vhs/queryvideo?' + new URLSearchParams(previewWidget.value.params));
+                let query = undefined;
                 try {
-                    let query_res = await fetch(qurl)
-                    query = await query_res.json()
+                    let query_res = await fetch(qurl);
+                    query = await query_res.json();
                 } catch(e) {
-                    return
+                    return;
                 }
-                previewNode.video_query = query
-            }
-            doQuery()
-        }
-        previewWidget.callback = previewWidget.updateSource
-        previewWidget.parentEl.appendChild(previewWidget.videoEl)
-        previewWidget.parentEl.appendChild(previewWidget.imgEl)
+                previewNode.video_query = query;
+            };
+            doQuery();
+        };
+
+        previewWidget.callback = previewWidget.updateSource;
     });
 }
+
 let copiedPath = undefined
 function addPreviewOptions(nodeType) {
     chainCallback(nodeType.prototype, "getExtraMenuOptions", function(_, options) {
