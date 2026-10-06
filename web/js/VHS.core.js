@@ -1011,11 +1011,13 @@ function addVideoPreview(nodeType, isInput=true) {
             userSelect: "none",
         });
 
-        // --- Play / Pause Button ---
+        // --- Play / Pause Button (SVG icons) ---
         const playBtn = document.createElement("button");
         previewWidget.playBtn = playBtn;
         playBtn.type = "button";
-        playBtn.textContent = "▶";
+        const PLAY_ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+        const PAUSE_ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>';
+        playBtn.innerHTML = PLAY_ICON;
         Object.assign(playBtn.style, {
             background: "#545454",
             color: "#eee",
@@ -1034,7 +1036,7 @@ function addVideoPreview(nodeType, isInput=true) {
         });
 
         const updatePlayBtn = () => {
-            playBtn.textContent = previewWidget.videoEl.paused ? "▶" : "⏸";
+            playBtn.innerHTML = previewWidget.videoEl.paused ? PLAY_ICON : PAUSE_ICON;
         };
 
         playBtn.onclick = (e) => {
@@ -1104,6 +1106,11 @@ function addVideoPreview(nodeType, isInput=true) {
                     border-radius: 50%;
                     cursor: pointer;
                 }
+                .vhs_preview_scrubber--live { opacity: 0.55; cursor: not-allowed; }
+                .vhs_preview_scrubber--live::-webkit-slider-runnable-track { background: #3d3d3d; }
+                .vhs_preview_scrubber--live::-webkit-slider-thumb { background: #6b7280; cursor: not-allowed; }
+                .vhs_preview_scrubber--live::-moz-range-track { background: #3d3d3d; }
+                .vhs_preview_scrubber--live::-moz-range-thumb { background: #6b7280; cursor: not-allowed; }
             `;
             document.head.appendChild(style);
         }
@@ -1154,6 +1161,17 @@ function addVideoPreview(nodeType, isInput=true) {
         scrubber.addEventListener("mouseup", stopScrub);
         scrubber.addEventListener("change", stopScrub);
 
+        previewWidget.isAdvanced = false;
+
+        const setScrubberMode = (advanced) => {
+            previewWidget.isAdvanced = !!advanced;
+            scrubber.classList.toggle('vhs_preview_scrubber--live', previewWidget.isAdvanced);
+            scrubber.disabled = previewWidget.isAdvanced;
+            scrubber.title = previewWidget.isAdvanced
+                ? 'Live transcode preview: seeking disabled'
+                : '';
+        };
+
         // Video playback events
         previewWidget.videoEl.addEventListener("play", updatePlayBtn);
         previewWidget.videoEl.addEventListener("pause", updatePlayBtn);
@@ -1183,10 +1201,13 @@ function addVideoPreview(nodeType, isInput=true) {
             fitHeight(this);
         });
 
-        previewWidget.videoEl.onmouseenter = () => {
+        // Unmute while hovering anywhere over the preview (video AND the
+        // controls bar). mouseenter/mouseleave don't bubble, so moving the
+        // pointer between the video and the controls won't toggle mute.
+        previewWidget.parentEl.onmouseenter = () => {
             previewWidget.videoEl.muted = previewWidget.value.muted;
         };
-        previewWidget.videoEl.onmouseleave = () => {
+        previewWidget.parentEl.onmouseleave = () => {
             previewWidget.videoEl.muted = true;
         };
 
@@ -1269,6 +1290,7 @@ function addVideoPreview(nodeType, isInput=true) {
                 }
                 this.videoEl.hidden = false;
                 this.imgEl.hidden = true;
+				setScrubberMode(advp);
             } else if (params.format?.split('/')[0] == 'image') {
                 this.imgEl.src = api.apiURL('/view?' + new URLSearchParams(params));
                 this.videoEl.hidden = true;
